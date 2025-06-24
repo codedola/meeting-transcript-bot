@@ -8,7 +8,7 @@
         "start:with-login": "node -r dotenv/config src/bot.js",
         "dev": "node src/bot.js",
         "setup": "npm install && npx playwright install chromium",
-        "test": "node src/bot.js https://meet.google.com/uwi-ydsp-mqz 'Test Bot'",
+        "test": "node src/bot.js https://meet.google.com/jwj-vwxr-ikz 'Test Bot'",
         "test:login": "GMAIL_EMAIL=test@gmail.com GMAIL_PASSWORD=test node src/bot.js https://meet.google.com/test-link",
         "clean": "rm -rf /tmp/meet-bot-* debug-screenshots/",
         "lint": "eslint src/",

@@ -52,9 +52,9 @@ const SELECTORS = {
   ],
 
   ASK_TO_JOIN: [
-    'button:has-text("Ask to join")',
-    'button:has-text("Yêu cầu tham gia")',
-    'button:has-text("Xin phép tham gia")',
+    'span:has-text("Ask to join")',
+    'span:has-text("Yêu cầu tham gia")',
+    'span:has-text("Xin phép tham gia")',
     'div[role="button"]:has-text("Ask to join")'
   ],
 
