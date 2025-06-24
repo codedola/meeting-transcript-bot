@@ -1,0 +1,63 @@
+{
+    "name": "meeting-transcript-bot",
+    "version": "1.0.0",
+    "description": "🤖 Tự động extract transcript từ Google Meet - Production Ready",
+    "main": "src/bot.js",
+    "scripts": {
+      "start": "node src/bot.js",
+      "dev": "node src/bot.js",
+      "setup": "npm install && npx playwright install chromium",
+      "test": "node src/bot.js https://meet.google.com/test-link 'Test Bot'",
+      "build": "echo 'No build process needed for Node.js'",
+      "lint": "eslint src/",
+      "format": "prettier --write src/"
+    },
+    "bin": {
+      "meeting-bot": "./src/bot.js"
+    },
+    "files": [
+      "src/",
+      "README.md",
+      "LICENSE"
+    ],
+    "keywords": [
+      "google-meet",
+      "transcript",
+      "automation",
+      "playwright",
+      "meeting-bot",
+      "javascript",
+      "typescript"
+    ],
+    "author": {
+      "name": "CodeDola",
+      "email": "contact@codedola.com",
+      "url": "https://github.com/codedola"
+    },
+    "license": "MIT",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/codedola/meeting-transcript-bot.git"
+    },
+    "bugs": {
+      "url": "https://github.com/codedola/meeting-transcript-bot/issues"
+    },
+    "homepage": "https://github.com/codedola/meeting-transcript-bot#readme",
+    "dependencies": {
+      "playwright": "^1.40.0"
+    },
+    "devDependencies": {
+      "eslint": "^8.0.0",
+      "prettier": "^3.0.0",
+      "@types/node": "^20.0.0"
+    },
+    "engines": {
+      "node": ">=16.0.0",
+      "npm": ">=8.0.0"
+    },
+    "os": [
+      "darwin",
+      "linux",
+      "win32"
+    ]
+  }
