@@ -7,7 +7,7 @@
       "start": "node src/bot.js",
       "dev": "node src/bot.js",
       "setup": "npm install && npx playwright install chromium",
-      "test": "node src/bot.js https://meet.google.com/test-link 'Test Bot'",
+      "test": "node src/bot.js https://meet.google.com/kmf-xtwe-bjp 'Test Bot'",
       "build": "echo 'No build process needed for Node.js'",
       "lint": "eslint src/",
       "format": "prettier --write src/"

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Meeting Transcript Bot - Main Service
+ * Meeting Transcript Bot - Main Service (Incognito Mode)
  * Automated Google Meet transcript extraction
  */
 
@@ -15,11 +15,15 @@ const {
   CONTEXT_CONFIG,
   DEBUG_CONFIG 
 } = require('./constants');
+const os = require('os');
+const path = require('path');
 
 class MeetingBot {
   constructor() {
     this.browser = null;
     this.page = null;
+    this.context = null;
+    this.tempDir = null;
     this.isRunning = false;
     this.intervals = {};
     this.extractor = new ContentExtractor();
@@ -32,7 +36,7 @@ class MeetingBot {
 
   async start(meetingUrl, botName = 'Transcript Bot') {
     try {
-      console.log('🤖 Starting Meeting Bot...');
+      console.log('🤖 Starting Meeting Bot (Incognito Mode)...');
       console.log(`📅 ${this.startTime.toLocaleString('vi-VN')}`);
       
       await this.initBrowser();
@@ -56,14 +60,56 @@ class MeetingBot {
   }
 
   async initBrowser() {
-    console.log('🌐 Initializing browser...');
+    console.log('🌐 Initializing incognito browser session...');
     
-    this.browser = await chromium.launch(BROWSER_CONFIG);
-    const context = await this.browser.newContext(CONTEXT_CONFIG);
-    this.page = await context.newPage();
+    // Create temporary directory for user data
+    this.tempDir = path.join(os.tmpdir(), `meet-bot-${Date.now()}`);
+    
+    // Use launchPersistentContext for incognito mode
+    this.context = await chromium.launchPersistentContext(this.tempDir, {
+      // Browser config
+      headless: BROWSER_CONFIG.headless,
+      slowMo: BROWSER_CONFIG.slowMo,
+      args: BROWSER_CONFIG.args,
+      
+      // Context config
+      ...CONTEXT_CONFIG
+    });
+
+    // Get the browser instance
+    this.browser = this.context.browser();
+    
+    // Get existing page or create new one
+    const pages = this.context.pages();
+    this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
 
     // Set longer timeouts
     this.page.setDefaultTimeout(TIMING.ELEMENT_TIMEOUT);
+    
+    // Clear any existing data (simulate fresh incognito)
+    try {
+      await this.page.evaluate(() => {
+        localStorage.clear();
+        sessionStorage.clear();
+      });
+      await this.context.clearCookies();
+    } catch (error) {
+      // Silent error - might not be loaded yet
+    }
+
+    // Block tracking requests (incognito-like behavior)
+    await this.page.route('**/*', (route) => {
+      const url = route.request().url();
+      
+      // Block analytics & tracking
+      if (url.includes('analytics') || 
+          url.includes('tracking') || 
+          url.includes('ads')) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
     
     // Debug logging
     if (DEBUG_CONFIG.VERBOSE_LOGGING) {
@@ -73,6 +119,9 @@ class MeetingBot {
         }
       });
     }
+
+    console.log('✅ Incognito session initialized');
+    console.log(`📂 Temp profile: ${this.tempDir}`);
   }
 
   async joinMeeting(meetingUrl, botName) {
@@ -83,8 +132,18 @@ class MeetingBot {
       timeout: TIMING.PAGE_LOAD_TIMEOUT 
     });
 
-    await this.fillBotName(botName);
+    // Check if meeting is blocked
+    const isBlocked = await this.checkMeetingBlocked();
+    if (isBlocked) {
+      throw new Error('❌ Meeting is private and requires host permission. Please:\n' +
+                     '1. Contact the meeting host to add you as participant\n' +
+                     '2. Use a meeting link with proper permissions\n' +
+                     '3. Try joining manually first to get admitted');
+    }
+
+    // Check disable media
     await this.disableMedia();
+    await this.fillBotName(botName);
     await this.clickJoinButton();
     
     console.log('⏳ Waiting for meeting to load...');
@@ -93,6 +152,42 @@ class MeetingBot {
     await this.enableTranscript();
     
     console.log('✅ Successfully joined meeting');
+  }
+
+  // ============================================================
+  // MEETING ACCESS CONTROL
+  // ============================================================
+
+  async checkMeetingBlocked() {
+    try {
+      for (const selector of SELECTORS.MEETING_BLOCKED) {
+        const element = await this.page.$(selector);
+        if (element) {
+          console.log('🚫 Detected blocked meeting');
+          return true;
+        }
+      }
+      return false;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async requestAdmission() {
+    try {
+      for (const selector of SELECTORS.ASK_TO_JOIN) {
+        const button = this.page.locator(selector).first();
+        
+        if (await button.isVisible({ timeout: 3000 })) {
+          await button.click();
+          await this.page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
+          console.log('✅ Requested admission');
+          return;
+        }
+      }
+    } catch (error) {
+      console.log('⚠️ Could not request admission automatically');
+    }
   }
 
   async setupRecording() {
@@ -130,7 +225,7 @@ class MeetingBot {
   }
 
   // ============================================================
-  // JOIN MEETING HELPERS
+  // JOIN MEETING HELPERS (keep existing methods)
   // ============================================================
 
   async fillBotName(botName) {
@@ -156,6 +251,8 @@ class MeetingBot {
 
   async disableMedia() {
     console.log('📹 Disabling camera and microphone...');
+
+    await this.toggleMedia(SELECTORS.DISABLE_MEDIA, 'camera');
     
     // Disable camera
     await this.toggleMedia(SELECTORS.CAMERA_BUTTON, 'camera');
@@ -234,7 +331,7 @@ class MeetingBot {
   }
 
   // ============================================================
-  // MEETING END DETECTION
+  // MEETING END DETECTION (keep existing)
   // ============================================================
 
   async checkMeetingEnd() {
@@ -334,9 +431,22 @@ class MeetingBot {
         if (interval) clearInterval(interval);
       });
       
-      // Close browser
-      if (this.browser) {
+      // Close context (this also closes browser)
+      if (this.context) {
+        await this.context.close();
+      } else if (this.browser) {
         await this.browser.close();
+      }
+      
+      // Clean up temporary directory
+      if (this.tempDir) {
+        try {
+          const fs = require('fs').promises;
+          await fs.rmdir(this.tempDir, { recursive: true });
+          console.log('🗑️  Temp directory cleaned');
+        } catch (error) {
+          console.log('⚠️ Could not clean temp directory:', error.message);
+        }
       }
       
       console.log('🧹 Cleanup completed');
@@ -367,7 +477,7 @@ class MeetingBot {
 }
 
 // ============================================================
-// CLI USAGE
+// CLI USAGE (keep existing)
 // ============================================================
 
 async function main() {
@@ -394,8 +504,8 @@ async function main() {
   }
 
   // Display startup info
-  console.log('\n🤖 Meeting Transcript Bot v1.0.0');
-  console.log('===============================');
+  console.log('\n🤖 Meeting Transcript Bot v1.0.0 (Incognito Mode)');
+  console.log('=================================================');
   console.log(`🎯 Meeting: ${meetingUrl}`);
   console.log(`👤 Bot Name: ${botName}`);
   console.log(`📅 Started: ${new Date().toLocaleString('vi-VN')}\n`);
