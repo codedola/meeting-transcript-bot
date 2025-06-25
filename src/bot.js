@@ -4,7 +4,8 @@
  * Meeting Transcript Bot - Main Service với Gmail Login
  * Automated Google Meet transcript extraction
  */
-
+require('dotenv').config();
+const config = require('../config');
 const { chromium } = require('playwright');
 const ContentExtractor = require('./content');
 const { 
@@ -816,8 +817,8 @@ async function main() {
 
   // Get Gmail credentials from environment
   const credentials = {
-    email: process.env.GMAIL_EMAIL,
-    password: process.env.GMAIL_PASSWORD
+    email: config.gmail.email,
+    password: config.gmail.password
   };
 
   // Check if credentials are provided
