@@ -1,15 +1,13 @@
 {
     "name": "meeting-transcript-bot",
-    "version": "1.0.0",
-    "description": "🤖 Tự động extract transcript từ Google Meet - Production Ready",
+    "version": "2.1.0",
+    "description": "🤖 Tự động extract transcript từ Google Meet - Simplified & Compliant",
     "main": "src/bot.js",
     "scripts": {
         "start": "node src/bot.js",
-        "start:with-login": "node -r dotenv/config src/bot.js",
         "dev": "node src/bot.js",
         "setup": "npm install && npx playwright install chromium",
-        "test": "node src/bot.js https://meet.google.com/nrt-inxh-qkn 'Test Bot'",
-        "test:login": "GMAIL_EMAIL=test@gmail.com GMAIL_PASSWORD=test node src/bot.js https://meet.google.com/test-link",
+        "test": "node src/bot.js https://meet.google.com/mfk-mwsc-xqv 'ai-assistant-recap'",
         "clean": "rm -rf /tmp/meet-bot-* debug-screenshots/",
         "lint": "eslint src/",
         "format": "prettier --write src/"
@@ -29,7 +27,7 @@
         "playwright",
         "meeting-bot",
         "javascript",
-        "typescript"
+        "compliance"
     ],
     "author": {
         "name": "CodeDola",

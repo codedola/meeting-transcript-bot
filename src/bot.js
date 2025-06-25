@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Meeting Transcript Bot - Main Service với Gmail Login
- * Automated Google Meet transcript extraction
+ * Meeting Transcript Bot - Main Service (Simplified)
+ * Automated Google Meet transcript extraction without Gmail login
  */
-require('dotenv').config();
-const config = require('../config');
 const { chromium } = require('playwright');
 const ContentExtractor = require('./content');
 const { 
@@ -20,66 +18,112 @@ const os = require('os');
 const path = require('path');
 
 class MeetingBot {
-  constructor(credentials = null) {
+  constructor() {
     this.browser = null;
     this.page = null;
     this.context = null;
-    this.tempDir = null;
     this.isRunning = false;
     this.intervals = {};
     this.extractor = new ContentExtractor();
     this.startTime = new Date();
-    this.credentials = credentials;
-    this.loginAttempts = 0;
-    this.maxLoginAttempts = 3;
   }
 
   // ============================================================
-  // 🚀 1. KHỞI TẠO BROWSER - Enhanced with better error handling
+  // 🚀 1. KHỞI TẠO BROWSER - Enhanced anti-detection
   // ============================================================
 
   async initBrowser() {
     console.log('🚀 Khởi tạo browser session...');
     
     try {
-      // Create temporary directory for user data (persistent for login)
-      this.tempDir = path.join(os.tmpdir(), `meet-bot-${Date.now()}`);
-      
-      // Use launchPersistentContext để lưu login session
-      this.context = await chromium.launchPersistentContext(this.tempDir, {
+      // Launch browser with enhanced stealth
+      this.browser = await chromium.launch({
         // Browser config
         headless: BROWSER_CONFIG.headless,
         slowMo: BROWSER_CONFIG.slowMo,
         args: [
           ...BROWSER_CONFIG.args,
+          // Enhanced anti-detection
           '--disable-blink-features=AutomationControlled',
+          '--exclude-switches=enable-automation',
           '--disable-dev-shm-usage',
           '--no-sandbox',
           '--disable-web-security',
-          '--disable-features=VizDisplayCompositor'
-        ],
-        
-        // Context config cho login
+          '--disable-features=VizDisplayCompositor',
+          '--disable-background-networking',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-extensions',
+          '--disable-plugins',
+          '--disable-sync',
+          '--metrics-recording-only',
+          '--no-report-upload',
+          '--disable-crash-reporter',
+          '--mute-audio'
+        ]
+      });
+
+      // Create new context with enhanced stealth
+      this.context = await this.browser.newContext({
         ...CONTEXT_CONFIG,
         
-        // Persistent storage cho login session
+        // Enhanced stealth
         acceptDownloads: true,
-        ignoreHTTPSErrors: true,
-        
-        // Clear theo từng session thay vì incognito hoàn toàn
+        ignoreHTTPSErrors: false,
         storageState: undefined
       });
 
-      // Get the browser instance
-      this.browser = this.context.browser();
-      
-      // Get existing page or create new one
-      const pages = this.context.pages();
-      this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
+      // Create new page
+      this.page = await this.context.newPage();
 
       // Set longer timeouts
       this.page.setDefaultTimeout(TIMING.ELEMENT_TIMEOUT);
       
+      // Enhanced stealth - Remove webdriver property
+      await this.page.addInitScript(() => {
+        // Remove automation indicators
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined,
+        });
+        
+        // Mock chrome extension
+        window.chrome = {
+          runtime: {},
+        };
+        
+        // Mock permissions
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+          parameters.name === 'notifications' ?
+            Promise.resolve({ state: Notification.permission }) :
+            originalQuery(parameters)
+        );
+
+        // Remove automation signals
+        delete window.__webdriver_script_fn;
+        delete window.__webdriver_evaluate;
+        delete window.__selenium_unwrapped;
+        delete window.__fxdriver_unwrapped;
+        delete window.__driver_evaluate;
+        delete window.__webdriver_evaluate__;
+        delete window.__selenium_evaluate;
+        delete window.__fxdriver_evaluate;
+        delete window.__driver_unwrapped;
+        delete window.__webdriver_unwrapped;
+        delete window.__webdriver_script_func;
+        
+        // Override plugins length
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [1, 2, 3, 4, 5],
+        });
+
+        // Override languages
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['en-US', 'en'],
+        });
+      });
+
       // Debug logging
       if (DEBUG_CONFIG.VERBOSE_LOGGING) {
         this.page.on('console', msg => {
@@ -90,7 +134,6 @@ class MeetingBot {
       }
 
       console.log('✅ Browser khởi tạo thành công');
-      console.log(`📂 Profile: ${this.tempDir}`);
       
       return true;
     } catch (error) {
@@ -100,272 +143,7 @@ class MeetingBot {
   }
 
   // ============================================================
-  // 🔐 2. LOGIN GMAIL - Simplified and more reliable
-  // ============================================================
-
-  async loginToGmail() {
-    if (!this.credentials || !this.credentials.email || !this.credentials.password) {
-      console.log('⚠️ Không có credentials Gmail - bỏ qua đăng nhập');
-      return false;
-    }
-
-    console.log('🔐 Đang đăng nhập Gmail...');
-    
-    try {
-      // Check if already logged in
-      await this.page.goto('https://accounts.google.com/', { 
-        waitUntil: 'networkidle',
-        timeout: TIMING.PAGE_LOAD_TIMEOUT 
-      });
-      
-      await this.page.waitForTimeout(2000);
-      
-      // If we see account info, we're already logged in
-      const currentUrl = this.page.url();
-      if (currentUrl.includes('myaccount.google.com') || 
-          await this.page.$('div[data-ved]') || 
-          await this.page.$('a[href*="myaccount"]')) {
-        console.log('✅ Đã đăng nhập từ session trước');
-        return true;
-      }
-
-      // Navigate to Gmail login
-      await this.page.goto('https://accounts.google.com/signin/v2/identifier?service=mail&flowName=GlifWebSignIn', { 
-        waitUntil: 'networkidle',
-        timeout: TIMING.PAGE_LOAD_TIMEOUT
-      });
-      
-      await this.page.waitForTimeout(2000);
-      
-      // Fill email
-      console.log('📧 Nhập email...');
-      const emailFilled = await this.fillEmailField();
-      if (!emailFilled) {
-        throw new Error('Không thể nhập email');
-      }
-      
-      // Click Next for email
-      await this.clickNextButton();
-      await this.page.waitForTimeout(3000);
-      
-      // Fill password
-      console.log('🔑 Nhập password...');
-      const passwordFilled = await this.fillPasswordField();
-      if (!passwordFilled) {
-        throw new Error('Không thể nhập password');
-      }
-      
-      // Click Next for password
-      await this.clickNextButton();
-      await this.page.waitForTimeout(5000);
-      
-      // Handle potential 2FA
-      const twoFactorHandled = await this.handle2FA();
-      
-      // Verify login
-      const loginSuccess = await this.verifyLogin();
-      
-      if (loginSuccess) {
-        console.log('✅ Đăng nhập Gmail thành công');
-        return true;
-      } else {
-        throw new Error('Xác thực đăng nhập thất bại');
-      }
-      
-    } catch (error) {
-      this.loginAttempts++;
-      console.error(`❌ Lỗi đăng nhập (lần ${this.loginAttempts}):`, error.message);
-      
-      if (this.loginAttempts < this.maxLoginAttempts) {
-        console.log('🔄 Thử lại đăng nhập...');
-        await this.page.waitForTimeout(2000);
-        return await this.loginToGmail();
-      } else {
-        console.log('⚠️ Đã hết số lần thử đăng nhập - tiếp tục không đăng nhập');
-        return false;
-      }
-    }
-  }
-
-  async fillEmailField() {
-    const emailSelectors = [
-      'input[type="email"]',
-      '#identifierId',
-      'input[name="identifier"]',
-      'input[aria-label*="email"]'
-    ];
-    
-    for (const selector of emailSelectors) {
-      try {
-        const emailInput = this.page.locator(selector).first();
-        if (await emailInput.isVisible({ timeout: 3000 })) {
-          await emailInput.clear();
-          await emailInput.fill(this.credentials.email);
-          await this.page.waitForTimeout(500);
-          return true;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-    return false;
-  }
-
-  async fillPasswordField() {
-    const passwordSelectors = [
-      'input[type="password"]',
-      'input[name="password"]',
-      '#password',
-      'input[aria-label*="password"]'
-    ];
-    
-    for (const selector of passwordSelectors) {
-      try {
-        const passwordInput = this.page.locator(selector).first();
-        if (await passwordInput.isVisible({ timeout: 5000 })) {
-          await passwordInput.clear();
-          await passwordInput.fill(this.credentials.password);
-          await this.page.waitForTimeout(500);
-          return true;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-    return false;
-  }
-
-  async clickNextButton() {
-    const nextButtonSelectors = [
-      '#identifierNext',
-      '#passwordNext',
-      'button:has-text("Next")',
-      'button:has-text("Tiếp theo")',
-      '[data-button-name="next"]',
-      'button[type="submit"]'
-    ];
-    
-    for (const selector of nextButtonSelectors) {
-      try {
-        const nextButton = this.page.locator(selector).first();
-        if (await nextButton.isVisible({ timeout: 3000 })) {
-          await nextButton.click();
-          return true;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-    return false;
-  }
-
-  async handle2FA() {
-    try {
-      // Check for 2FA prompt
-      const twoFactorSelectors = [
-        'input[type="tel"]',
-        'input[aria-label*="code"]',
-        'input[name="totpPin"]',
-        '[data-error-id="CHALLENGE_REQUIRED"]'
-      ];
-      
-      let requires2FA = false;
-      for (const selector of twoFactorSelectors) {
-        try {
-          if (await this.page.locator(selector).isVisible({ timeout: 2000 })) {
-            requires2FA = true;
-            break;
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-      
-      if (requires2FA) {
-        console.log('⚠️ Tài khoản yêu cầu 2FA. Vui lòng xác thực thủ công trong 120 giây...');
-        console.log('📱 Kiểm tra điện thoại và nhập mã xác thực');
-        
-        // Wait for user to complete 2FA manually
-        let waitCount = 0;
-        while (waitCount < 120) {
-          await this.page.waitForTimeout(1000);
-          
-          const currentUrl = this.page.url();
-          if (currentUrl.includes('myaccount.google.com') || 
-              currentUrl.includes('accounts.google.com/b/') ||
-              await this.page.$('div[data-ved]')) {
-            console.log('✅ 2FA hoàn tất');
-            return true;
-          }
-          
-          waitCount++;
-        }
-        
-        console.log('⏰ 2FA timeout - tiếp tục...');
-        return false;
-      }
-      
-      return true;
-    } catch (error) {
-      console.log('📝 Không có 2FA, tiếp tục...');
-      return true;
-    }
-  }
-
-  // ============================================================
-  // ✅ 3. VERIFY LOGIN - Improved validation
-  // ============================================================
-
-  async verifyLogin() {
-    try {
-      // Wait for potential redirects
-      await this.page.waitForTimeout(3000);
-      
-      // Check for common post-login indicators
-      const currentUrl = this.page.url();
-      
-      // Success indicators
-      if (currentUrl.includes('myaccount.google.com') || 
-          currentUrl.includes('accounts.google.com/b/') ||
-          await this.page.$('div[data-ved]') ||
-          await this.page.$('a[href*="myaccount"]')) {
-        return true;
-      }
-      
-      // Check for login errors
-      const errorSelectors = [
-        '[data-error-id]',
-        '.LXRPh',
-        '[role="alert"]',
-        'div:has-text("Wrong password")',
-        'div:has-text("Couldn\'t find your Google Account")'
-      ];
-      
-      for (const selector of errorSelectors) {
-        try {
-          const errorElement = this.page.locator(selector).first();
-          if (await errorElement.isVisible({ timeout: 2000 })) {
-            const errorText = await errorElement.textContent();
-            console.log(`⚠️ Login error: ${errorText}`);
-            return false;
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-      
-      // If no clear success or error, assume ok and continue
-      console.log('⚠️ Login status unclear - continuing...');
-      return true;
-      
-    } catch (error) {
-      console.log('⚠️ Verify login error:', error.message);
-      return true; // Continue anyway
-    }
-  }
-
-  // ============================================================
-  // 🔗 4. VÀO MEETING LINK - Enhanced meeting join flow
+  // 🔗 2. VÀO MEETING LINK - Enhanced meeting join flow
   // ============================================================
 
   async joinMeeting(meetingUrl, botName) {
@@ -392,8 +170,8 @@ class MeetingBot {
       
       console.log('⏳ Đang đợi vào meeting...');
       await this.page.waitForTimeout(TIMING.AFTER_JOIN_WAIT);
-      
-      await this.enableTranscript();
+
+      // await this.enableTranscript();
       
       console.log('✅ Đã vào meeting thành công');
       return true;
@@ -443,7 +221,7 @@ class MeetingBot {
   }
 
   // ============================================================
-  // 📷 5. TẮT CAMERA/MIC - Reliable media control
+  // 📷 3. TẮT CAMERA/MIC - Reliable media control
   // ============================================================
 
   async disableMedia() {
@@ -454,8 +232,8 @@ class MeetingBot {
       await this.toggleMedia(SELECTORS.DISABLE_MEDIA, 'media shortcut');
       
       // Then individual controls
-      await this.toggleMedia(SELECTORS.CAMERA_BUTTON, 'camera');
-      await this.toggleMedia(SELECTORS.MIC_BUTTON, 'microphone');
+      // await this.toggleMedia(SELECTORS.CAMERA_BUTTON, 'camera');
+      // await this.toggleMedia(SELECTORS.MIC_BUTTON, 'microphone');
       
       console.log('✅ Đã tắt camera/mic');
       return true;
@@ -484,7 +262,7 @@ class MeetingBot {
   }
 
   // ============================================================
-  // ✅ 6. JOIN MEETING - Enhanced join button detection
+  // ✅ 4. JOIN MEETING - Enhanced join button detection
   // ============================================================
 
   async clickJoinButton() {
@@ -526,7 +304,7 @@ class MeetingBot {
   }
 
   // ============================================================
-  // 📝 7. ENABLE TRANSCRIPT - Better transcript activation
+  // 📝 5. ENABLE TRANSCRIPT - Better transcript activation
   // ============================================================
 
   async enableTranscript() {
@@ -566,7 +344,7 @@ class MeetingBot {
   }
 
   // ============================================================
-  // 👂 8. MONITOR & EXTRACT TRANSCRIPT - Optimized monitoring
+  // 👂 6. MONITOR & EXTRACT TRANSCRIPT - Optimized monitoring
   // ============================================================
 
   async setupRecording() {
@@ -620,21 +398,16 @@ class MeetingBot {
 
   async start(meetingUrl, botName = 'Transcript Bot') {
     try {
-      console.log('🤖 Starting Meeting Bot với Gmail Login...');
+      console.log('🤖 Starting Meeting Bot...');
       console.log(`📅 ${this.startTime.toLocaleString('vi-VN')}`);
       
       // 1. 🚀 Khởi tạo browser
       await this.initBrowser();
       
-      // 2. 🔐 Login Gmail (optional)
-      if (this.credentials) {
-        await this.loginToGmail();
-      }
-      
-      // 3-6. Join meeting flow
+      // 2. Join meeting flow
       await this.joinMeeting(meetingUrl, botName);
       
-      // 7-8. Setup recording
+      // 3. Setup recording
       await this.setupRecording();
       
       console.log('✅ Bot đang hoạt động! Đang ghi transcript...');
@@ -654,7 +427,7 @@ class MeetingBot {
   }
 
   // ============================================================
-  // SUPPORTING METHODS - Keep existing functionality
+  // SUPPORTING METHODS
   // ============================================================
 
   async checkMeetingEnd() {
@@ -750,15 +523,22 @@ class MeetingBot {
         if (interval) clearInterval(interval);
       });
       
-      // Close context (this also closes browser)
+      // Close page first
+      if (this.page && !this.page.isClosed()) {
+        await this.page.close();
+      }
+      
+      // Close context
       if (this.context) {
         await this.context.close();
-      } else if (this.browser) {
+      }
+      
+      // Close browser
+      if (this.browser) {
         await this.browser.close();
       }
       
-      // Keep temp directory for session persistence
-      console.log('🧹 Cleanup completed (login session preserved)');
+      console.log('🧹 Cleanup completed');
     } catch (error) {
       console.error('⚠️ Cleanup error:', error.message);
     }
@@ -786,7 +566,7 @@ class MeetingBot {
 }
 
 // ============================================================
-// CLI USAGE với Gmail credentials
+// CLI USAGE - Simplified
 // ============================================================
 
 async function main() {
@@ -803,9 +583,6 @@ async function main() {
     console.log('\n💡 Examples:');
     console.log('   node src/bot.js "https://meet.google.com/abc-defg-hij"');
     console.log('   node src/bot.js "https://meet.google.com/abc-defg-hij" "Daily Standup Bot"');
-    console.log('\n🔐 Gmail Login:');
-    console.log('   Set credentials in environment variables:');
-    console.log('   GMAIL_EMAIL=your@gmail.com GMAIL_PASSWORD=app-password node src/bot.js "meeting-url"');
     process.exit(1);
   }
 
@@ -815,28 +592,14 @@ async function main() {
     process.exit(1);
   }
 
-  // Get Gmail credentials from environment
-  const credentials = {
-    email: config.gmail.email,
-    password: config.gmail.password
-  };
-
-  // Check if credentials are provided
-  const hasCredentials = credentials.email && credentials.password;
-  console.log('TODO: ',hasCredentials);
-
   // Display startup info
-  console.log('\n🤖 Meeting Transcript Bot v2.0.0 với Gmail Login');
+  console.log('\n🤖 Meeting Transcript Bot v2.1.0 - Simplified');
   console.log('=======================================================');
   console.log(`🎯 Meeting: ${meetingUrl}`);
   console.log(`👤 Bot Name: ${botName}`);
-  console.log(`🔐 Gmail Login: ${hasCredentials ? '✅ Enabled' : '❌ Disabled (no credentials)'}`);
-  if (hasCredentials) {
-    console.log(`📧 Email: ${credentials.email}`);
-  }
   console.log(`📅 Started: ${new Date().toLocaleString('vi-VN')}\n`);
 
-  const bot = new MeetingBot(hasCredentials ? credentials : null);
+  const bot = new MeetingBot();
 
   // Handle Ctrl+C gracefully
   process.on('SIGINT', async () => {
