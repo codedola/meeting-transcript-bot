@@ -98,34 +98,6 @@ const SELECTORS = {
     '[data-speaker-name]'
   ],
 
-  // Chat messages
-  CHAT_TOGGLE: [
-    'button[aria-label*="Chat"]',
-    'button[aria-label*="Trò chuyện"]',
-    'div[data-tooltip*="Chat"]',
-    'button[aria-label*="chat"]'
-  ],
-
-  CHAT_MESSAGES: [
-    'div[jsname="b0t70b"]',
-    '.z38b6',
-    'div[data-sender-name]',
-    '[data-chat-message]'
-  ],
-
-  CHAT_SENDER: [
-    'div[jsname="GbLWUe"]',
-    '.GbLWUe',
-    'span[data-sender-name]',
-    '[data-chat-sender]'
-  ],
-
-  CHAT_TEXT: [
-    'div[jsname="YSxPC"]',
-    '.YSxPC',
-    '[data-chat-text]'
-  ],
-
   // Meeting info
   MEETING_TITLE: [
     'h1[jsname="r4nke"]',
@@ -272,7 +244,6 @@ const CONTEXT_CONFIG = {
 
 const SHORTCUTS = {
   TOGGLE_CAPTIONS: 'c',
-  TOGGLE_CHAT: 'Control+Alt+c',
   TOGGLE_MIC: 'd',
   TOGGLE_CAMERA: 'e',
   LEAVE_MEETING: 'Control+d'

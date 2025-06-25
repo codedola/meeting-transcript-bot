@@ -357,7 +357,6 @@ class MeetingBot {
       
       try {
         await this.extractor.extractTranscript(this.page);
-        await this.extractor.extractChat(this.page);
       } catch (error) {
         if (DEBUG_CONFIG.VERBOSE_LOGGING) {
           console.log('⚠️ Extract error:', error.message);
@@ -386,7 +385,7 @@ class MeetingBot {
       if (!this.isRunning) return;
       
       const stats = this.extractor.getStats();
-      process.stdout.write(`\r📊 Live: ${stats.transcriptCount} transcripts, ${stats.chatCount} chats, ${stats.duration}`);
+      process.stdout.write(`\r📊 Live: ${stats.transcriptCount} transcripts, ${stats.duration}`);
     }, 5000);
 
     console.log('✅ Monitoring started');
@@ -411,7 +410,7 @@ class MeetingBot {
       await this.setupRecording();
       
       console.log('✅ Bot đang hoạt động! Đang ghi transcript...');
-      console.log('📝 Monitoring transcript và chat messages');
+      console.log('📝 Monitoring transcript messages');
       console.log('⏹️  Nhấn Ctrl+C để dừng và tải về\n');
 
     } catch (error) {
@@ -484,7 +483,6 @@ class MeetingBot {
       const stats = this.extractor.getStats();
       console.log('\n📊 Final Statistics:');
       console.log(`   📝 Transcripts: ${stats.transcriptCount}`);
-      console.log(`   💬 Chat messages: ${stats.chatCount}`);
       console.log(`   ⏱️  Duration: ${stats.duration}`);
       console.log(`   📄 File: ${filePath}`);
       

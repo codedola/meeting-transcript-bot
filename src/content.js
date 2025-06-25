@@ -11,11 +11,9 @@ const { SELECTORS, EXPORT_CONFIG } = require('./constants');
 class ContentExtractor {
   constructor() {
     this.transcript = [];
-    this.chatMessages = [];
     this.meetingTitle = 'Google Meet';
     this.startTime = new Date();
     this.lastTranscriptCount = 0;
-    this.lastChatCount = 0;
   }
 
   // ============================================================
@@ -105,124 +103,6 @@ class ContentExtractor {
   }
 
   // ============================================================
-  // CHAT EXTRACTION
-  // ============================================================
-
-  async extractChat(page) {
-    try {
-      // Ensure chat panel is visible
-      await this.ensureChatVisible(page);
-      
-      // Extract chat messages
-      for (const selector of SELECTORS.CHAT_MESSAGES) {
-        try {
-          const chatElements = await page.$$(selector);
-          
-          if (chatElements.length > 0) {
-            await this.processChatElements(page, chatElements);
-            
-            // Log progress if new messages found
-            if (this.chatMessages.length > this.lastChatCount) {
-              console.log(`💬 New chat: ${this.chatMessages.length - this.lastChatCount} messages`);
-              this.lastChatCount = this.chatMessages.length;
-            }
-            
-            return; // Success, exit loop
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-    } catch (error) {
-      // Silent error - chat might not be available
-    }
-  }
-
-  async ensureChatVisible(page) {
-    try {
-      // Check if chat panel is already visible
-      const chatPanel = await page.$('[data-tab-id="2"]');
-      if (chatPanel) return;
-      
-      // Try to click chat toggle button
-      for (const selector of SELECTORS.CHAT_TOGGLE) {
-        try {
-          const chatButton = await page.$(selector);
-          if (chatButton) {
-            await chatButton.click();
-            await page.waitForTimeout(1000);
-            return;
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-    } catch (error) {
-      // Silent error
-    }
-  }
-
-  async processChatElements(page, elements) {
-    for (const element of elements) {
-      try {
-        const sender = await this.findChatSender(element);
-        const text = await this.findChatText(element);
-        
-        if (text && text.trim() && this.isNewChat(sender, text)) {
-          this.chatMessages.push({
-            time: new Date(),
-            name: sender || 'Unknown',
-            text: text.trim()
-          });
-        }
-      } catch (error) {
-        continue;
-      }
-    }
-  }
-
-  async findChatSender(chatElement) {
-    try {
-      for (const selector of SELECTORS.CHAT_SENDER) {
-        const senderElement = await chatElement.$(selector);
-        if (senderElement) {
-          const name = await senderElement.textContent();
-          if (name && name.trim()) {
-            return name.trim();
-          }
-        }
-      }
-      return 'Unknown';
-    } catch (error) {
-      return 'Unknown';
-    }
-  }
-
-  async findChatText(chatElement) {
-    try {
-      for (const selector of SELECTORS.CHAT_TEXT) {
-        const textElement = await chatElement.$(selector);
-        if (textElement) {
-          const text = await textElement.textContent();
-          if (text && text.trim()) {
-            return text.trim();
-          }
-        }
-      }
-      return '';
-    } catch (error) {
-      return '';
-    }
-  }
-
-  isNewChat(name, text) {
-    return !this.chatMessages.some(msg => 
-      msg.name === name && 
-      msg.text === text
-    );
-  }
-
-  // ============================================================
   // MEETING TITLE EXTRACTION
   // ============================================================
 
@@ -260,7 +140,7 @@ class ContentExtractor {
       await fs.writeFile(filePath, content, EXPORT_CONFIG.ENCODING);
       
       console.log(`✅ Transcript saved: ${filePath}`);
-      console.log(`📊 Stats: ${this.transcript.length} transcripts, ${this.chatMessages.length} chats`);
+      console.log(`📊 Stats: ${this.transcript.length} transcripts`);
 
       // Create backup if enabled
       if (EXPORT_CONFIG.AUTO_BACKUP) {
@@ -298,23 +178,11 @@ class ContentExtractor {
       content += `Không có transcript nào được ghi nhận.\n\n`;
     }
 
-    // Chat section
-    if (this.chatMessages.length > 0) {
-      content += `TIN NHẮN CHAT:\n`;
-      content += `${EXPORT_CONFIG.HEADER_SEPARATOR}\n\n`;
-      
-      this.chatMessages.forEach(msg => {
-        const time = new Date(msg.time).toLocaleTimeString('vi-VN');
-        content += `[${time}] ${msg.name}: ${msg.text}\n`;
-      });
-      content += `\n`;
-    }
-
     // Footer
     content += `\n${EXPORT_CONFIG.HEADER_SEPARATOR}\n`;
     content += `Tạo bởi Meeting Transcript Bot\n`;
     content += `Ngày tạo: ${endDate}\n`;
-    content += `Tổng cộng: ${this.transcript.length} transcript, ${this.chatMessages.length} chat\n`;
+    content += `Tổng cộng: ${this.transcript.length} transcript\n`;
 
     return content;
   }
@@ -365,7 +233,6 @@ class ContentExtractor {
   getStats() {
     return {
       transcriptCount: this.transcript.length,
-      chatCount: this.chatMessages.length,
       meetingTitle: this.meetingTitle,
       startTime: this.startTime,
       duration: this.calculateDuration()
@@ -375,7 +242,6 @@ class ContentExtractor {
   getTranscriptData() {
     return {
       transcript: this.transcript,
-      chatMessages: this.chatMessages,
       meetingTitle: this.meetingTitle,
       startTime: this.startTime
     };
@@ -383,11 +249,9 @@ class ContentExtractor {
 
   reset() {
     this.transcript = [];
-    this.chatMessages = [];
     this.meetingTitle = 'Google Meet';
     this.startTime = new Date();
     this.lastTranscriptCount = 0;
-    this.lastChatCount = 0;
   }
 }
 
