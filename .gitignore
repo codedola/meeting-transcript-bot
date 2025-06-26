@@ -6,7 +6,6 @@ yarn-error.log*
 .vscode/
 .idea/
 *.log
-debug-screenshots/
 Downloads/
 test-recordings/
 

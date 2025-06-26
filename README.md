@@ -238,13 +238,11 @@ Enable debug logging trong `src/constants.js`:
 
 ```javascript
 const DEBUG_CONFIG = {
-  VERBOSE_LOGGING: true,
-  SCREENSHOT_ON_ERROR: true,
-  SCREENSHOT_FOLDER: 'debug-screenshots'
+  VERBOSE_LOGGING: true
 };
 ```
 
-Khi có lỗi, bot sẽ tự động chụp screenshot và log chi tiết.
+Khi có lỗi, bot sẽ log chi tiết.
 
 ## 📊 Advanced Usage
 

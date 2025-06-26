@@ -103,27 +103,6 @@ class ContentExtractor {
   }
 
   // ============================================================
-  // MEETING TITLE EXTRACTION
-  // ============================================================
-
-  async updateMeetingTitle(page) {
-    try {
-      for (const selector of SELECTORS.MEETING_TITLE) {
-        const titleElement = await page.$(selector);
-        if (titleElement) {
-          const title = await titleElement.textContent();
-          if (title && title.trim()) {
-            this.meetingTitle = title.trim();
-            return;
-          }
-        }
-      }
-    } catch (error) {
-      // Silent error - use default title
-    }
-  }
-
-  // ============================================================
   // FILE EXPORT
   // ============================================================
 
@@ -141,11 +120,6 @@ class ContentExtractor {
       
       console.log(`✅ Transcript saved: ${filePath}`);
       console.log(`📊 Stats: ${this.transcript.length} transcripts`);
-
-      // Create backup if enabled
-      if (EXPORT_CONFIG.AUTO_BACKUP) {
-        await this.createBackup(content, filename);
-      }
 
       return filePath;
     } catch (error) {
@@ -207,44 +181,6 @@ class ContentExtractor {
     const minutes = Math.floor(duration / 60000);
     const seconds = Math.floor((duration % 60000) / 1000);
     return `${minutes}m ${seconds}s`;
-  }
-
-  async createBackup(content, filename) {
-    try {
-      const backupPath = path.join(
-        os.homedir(), 
-        EXPORT_CONFIG.BACKUP_FOLDER, 
-        filename
-      );
-      
-      await fs.mkdir(path.dirname(backupPath), { recursive: true });
-      await fs.writeFile(backupPath, content, EXPORT_CONFIG.ENCODING);
-      
-      console.log(`💾 Backup created: ${backupPath}`);
-    } catch (error) {
-      console.log('⚠️ Backup failed:', error.message);
-    }
-  }
-
-  // ============================================================
-  // UTILITY METHODS
-  // ============================================================
-
-  getStats() {
-    return {
-      transcriptCount: this.transcript.length,
-      meetingTitle: this.meetingTitle,
-      startTime: this.startTime,
-      duration: this.calculateDuration()
-    };
-  }
-
-  getTranscriptData() {
-    return {
-      transcript: this.transcript,
-      meetingTitle: this.meetingTitle,
-      startTime: this.startTime
-    };
   }
 
   reset() {

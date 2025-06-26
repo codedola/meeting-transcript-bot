@@ -8,7 +8,7 @@
         "dev": "node src/bot.js",
         "setup": "npm install && npx playwright install chromium",
         "test": "node src/bot.js https://meet.google.com/oid-tisy-onm?authuser=0 'ai-assistant-recap'",
-        "clean": "rm -rf /tmp/meet-bot-* debug-screenshots/",
+        "clean": "rm -rf /tmp/meet-bot-*",
         "lint": "eslint src/",
         "format": "prettier --write src/"
     },

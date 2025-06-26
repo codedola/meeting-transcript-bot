@@ -278,8 +278,7 @@ const DEBUG_CONFIG = {
   VERBOSE_LOGGING: false,               // Tắt verbose logging cho production
   LOG_SELECTORS: false,                // Không log selectors
   LOG_TIMING: false,                   // Không log timing
-  SCREENSHOT_ON_ERROR: true,           // Chỉ screenshot khi có lỗi
-  SCREENSHOT_FOLDER: 'debug-screenshots'
+  SCREENSHOT_ON_ERROR: false           // Disable screenshots
 };
 
 // ============================================================
