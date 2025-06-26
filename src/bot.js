@@ -1,660 +1,434 @@
-#!/usr/bin/env node
-
-/**
- * Meeting Transcript Bot - Main Service (Simplified)
- * Automated Google Meet transcript extraction without Gmail login
- */
 const { chromium } = require('playwright');
-const ContentExtractor = require('./content');
-const { 
-  SELECTORS, 
-  SHORTCUTS, 
-  TIMING, 
-  BROWSER_CONFIG, 
-  CONTEXT_CONFIG,
-  DEBUG_CONFIG 
-} = require('./constants');
-const os = require('os');
-const path = require('path');
+const readline = require('readline');
 
-class MeetingBot {
-  constructor() {
-    this.browser = null;
-    this.page = null;
-    this.context = null;
-    this.isRunning = false;
-    this.intervals = {};
-    this.extractor = new ContentExtractor();
-    this.startTime = new Date();
+// Enhanced selector configuration
+const SELECTORS = {
+  // Join meeting flow
+  NAME_INPUT: [
+    'input[aria-label*="Tên của bạn"]',
+    'input[placeholder*="Tên của bạn"]',
+    'input[aria-label*="Your name"]',
+    'input[placeholder*="Your name"]',
+    'input[jsname="YPqjbf"]',
+    '#c9',
+    'input[aria-label*="name"]',
+    'input[type="text"][placeholder*="name"]'
+  ],
+
+  CAMERA_BUTTON: [
+    'div[data-is-muted="false"][aria-label*="camera"]',
+    'div[jsname="BOHaEe"]',
+    'button[aria-label*="Turn off camera"]',
+    'button[aria-label*="Tắt camera"]',
+    'button[aria-label*="camera"]'
+  ],
+
+  MIC_BUTTON: [
+    'div[data-is-muted="false"][aria-label*="microphone"]',
+    'div[jsname="BOHaEe"]',
+    'button[aria-label*="Turn off microphone"]', 
+    'button[aria-label*="Tắt micrô"]',
+    'button[aria-label*="microphone"]'
+  ],
+
+  JOIN_BUTTON: [
+    'span:has-text("Ask to join")',
+    'span:has-text("Yêu cầu tham gia")',
+    'span:has-text("Join now")',
+    'span:has-text("Tham gia ngay")',
+    'button[jsname="Qx7uuf"]',
+    'div[role="button"]:has-text("Join")',
+    'button:has-text("Join")',
+    'button:has-text("Tham gia")'
+  ],
+
+  DISABLE_MEDIA: [
+    'span:has-text("Tiếp tục mà không sử dụng micrô và máy ảnh")',
+    'span:has-text("Continue without microphone and camera")',
+    'button:has-text("Continue without microphone and camera")'
+  ],
+
+  // Meeting access control
+  MEETING_BLOCKED: [
+    'div:has-text("You can\'t join this video call")',
+    'div:has-text("Bạn không thể tham gia cuộc gọi video này")',
+    'h1:has-text("You can\'t join this video call")',
+    'span:has-text("No one can join a meeting unless invited")',
+    'button:has-text("Return to home screen")',
+    'div:has-text("Meeting hasn\'t started")',
+    'div:has-text("Cuộc họp chưa bắt đầu")',
+    'div:has-text("Your meeting is safe")',
+    'div:has-text("No one can join a meeting unless invited or admitted by the host")'
+  ],
+
+  // Meeting end detection
+  MEETING_END: [
+    'span:has-text("You left the meeting")',
+    'span:has-text("Bạn đã rời khỏi cuộc họp")',
+    'div:has-text("Meeting ended")',
+    'button:has-text("Rejoin")',
+    'button:has-text("Tham gia lại")',
+    'div:has-text("Thanks for joining")'
+  ]
+};
+
+// Enhanced timing configuration
+const TIMING = {
+  AFTER_JOIN_WAIT: 8000,
+  AFTER_CLICK_WAIT: 1500,
+  ELEMENT_LOAD_WAIT: 5000,
+  ELEMENT_TIMEOUT: 15000,
+  PAGE_LOAD_TIMEOUT: 45000
+};
+
+// Create readline interface for user input
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+// Helper function to get user input
+function askQuestion(question) {
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      resolve(answer);
+    });
+  });
+}
+
+// Helper function to wait for a specific time
+function waitUntil(targetTime) {
+  const now = new Date();
+  const waitTime = targetTime.getTime() - now.getTime();
+  
+  if (waitTime > 0) {
+    console.log(`Waiting ${Math.round(waitTime / 1000)} seconds until ${targetTime.toLocaleTimeString()}...`);
+    return new Promise(resolve => setTimeout(resolve, waitTime));
   }
+  return Promise.resolve();
+}
 
-  // ============================================================
-  // 🚀 1. KHỞI TẠO BROWSER - Enhanced anti-detection
-  // ============================================================
-
-  async initBrowser() {
-    console.log('🚀 Khởi tạo browser session...');
-    
+// Helper function to try multiple selectors
+async function tryMultipleSelectors(page, selectors, timeout = TIMING.ELEMENT_TIMEOUT) {
+  for (const selector of selectors) {
     try {
-      // Launch browser with enhanced stealth
-      this.browser = await chromium.launch({
-        // Browser config
-        headless: BROWSER_CONFIG.headless,
-        slowMo: BROWSER_CONFIG.slowMo,
-        args: [
-          ...BROWSER_CONFIG.args,
-          // Enhanced anti-detection
-          '--disable-blink-features=AutomationControlled',
-          '--exclude-switches=enable-automation',
-          '--disable-dev-shm-usage',
-          '--no-sandbox',
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor',
-          '--disable-background-networking',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
-          '--disable-extensions',
-          '--disable-plugins',
-          '--disable-sync',
-          '--metrics-recording-only',
-          '--no-report-upload',
-          '--disable-crash-reporter',
-          '--mute-audio'
-        ]
-      });
-
-      // Create new context with enhanced stealth
-      this.context = await this.browser.newContext({
-        ...CONTEXT_CONFIG,
-        
-        // Enhanced stealth
-        acceptDownloads: true,
-        ignoreHTTPSErrors: false,
-        storageState: undefined
-      });
-
-      // Create new page
-      this.page = await this.context.newPage();
-
-      // Set longer timeouts
-      this.page.setDefaultTimeout(TIMING.ELEMENT_TIMEOUT);
-      
-      // Enhanced stealth - Remove webdriver property
-      await this.page.addInitScript(() => {
-        // Remove automation indicators
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => undefined,
-        });
-        
-        // Mock chrome extension
-        window.chrome = {
-          runtime: {},
-        };
-        
-        // Mock permissions
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters) => (
-          parameters.name === 'notifications' ?
-            Promise.resolve({ state: Notification.permission }) :
-            originalQuery(parameters)
-        );
-
-        // Remove automation signals
-        delete window.__webdriver_script_fn;
-        delete window.__webdriver_evaluate;
-        delete window.__selenium_unwrapped;
-        delete window.__fxdriver_unwrapped;
-        delete window.__driver_evaluate;
-        delete window.__webdriver_evaluate__;
-        delete window.__selenium_evaluate;
-        delete window.__fxdriver_evaluate;
-        delete window.__driver_unwrapped;
-        delete window.__webdriver_unwrapped;
-        delete window.__webdriver_script_func;
-        
-        // Override plugins length
-        Object.defineProperty(navigator, 'plugins', {
-          get: () => [1, 2, 3, 4, 5],
-        });
-
-        // Override languages
-        Object.defineProperty(navigator, 'languages', {
-          get: () => ['en-US', 'en'],
-        });
-      });
-
-      // Debug logging
-      if (DEBUG_CONFIG.VERBOSE_LOGGING) {
-        this.page.on('console', msg => {
-          if (msg.type() === 'error') {
-            console.log('🔴 Browser error:', msg.text());
-          }
-        });
+      const element = page.locator(selector).first();
+      await element.waitFor({ timeout: 2000 });
+      if (await element.isVisible()) {
+        return element;
       }
-
-      console.log('✅ Browser khởi tạo thành công');
-      
-      return true;
     } catch (error) {
-      console.error('❌ Lỗi khởi tạo browser:', error.message);
-      throw error;
+      // Continue to next selector
+      continue;
     }
   }
+  return null;
+}
 
-  // ============================================================
-  // 🔗 2. VÀO MEETING LINK - Enhanced meeting join flow
-  // ============================================================
-
-  async joinMeeting(meetingUrl, botName) {
-    console.log('🔗 Vào meeting link...');
-    
-    try {
-      await this.page.goto(meetingUrl, { 
-        waitUntil: 'networkidle',
-        timeout: TIMING.PAGE_LOAD_TIMEOUT 
-      });
-
-      await this.page.waitForTimeout(3000);
-
-      // Check if meeting is blocked
-      const isBlocked = await this.checkMeetingBlocked();
-      if (isBlocked) {
-        throw new Error('❌ Meeting bị chặn - cần quyền từ host');
-      }
-
-      // Join flow
-      await this.disableMedia();
-      await this.fillBotName(botName);
-      await this.clickJoinButton();
-      
-      console.log('⏳ Đang đợi vào meeting...');
-      await this.page.waitForTimeout(TIMING.AFTER_JOIN_WAIT);
-
-      // await this.enableTranscript();
-      
-      console.log('✅ Đã vào meeting thành công');
-      return true;
-      
-    } catch (error) {
-      console.error('❌ Lỗi vào meeting:', error.message);
-      throw error;
+// Function to handle name input if required
+async function handleNameInput(page) {
+  try {
+    const nameInput = await tryMultipleSelectors(page, SELECTORS.NAME_INPUT, 5000);
+    if (nameInput) {
+      await nameInput.fill('Meeting Bot');
+      console.log('Name entered.');
+      await page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
     }
+  } catch (error) {
+    console.log('No name input required or found.');
   }
+}
 
-  async checkMeetingBlocked() {
-    try {
-      for (const selector of SELECTORS.MEETING_BLOCKED) {
-        const element = await this.page.$(selector);
-        if (element) {
-          console.log('🚫 Phát hiện meeting bị chặn');
-          return true;
-        }
-      }
-      return false;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  async fillBotName(botName) {
-    console.log(`👤 Đặt tên bot: ${botName}`);
-    
-    for (const selector of SELECTORS.NAME_INPUT) {
-      try {
-        const input = this.page.locator(selector).first();
-        
-        if (await input.isVisible({ timeout: 3000 })) {
-          await input.clear();
-          await input.fill(botName);
-          await this.page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
-          console.log('✅ Đã đặt tên bot');
-          return true;
-        }
-      } catch (error) {
-        continue;
-      }
-    }
-    
-    console.log('⚠️ Không thể đặt tên bot - dùng mặc định');
+// Enhanced function to check if meeting is blocked
+async function checkMeetingBlocked(page) {
+  try {
+    const blockedIndicator = await tryMultipleSelectors(page, SELECTORS.MEETING_BLOCKED, 3000);
+    return blockedIndicator !== null;
+  } catch (error) {
     return false;
   }
+}
 
-  // ============================================================
-  // 📷 3. TẮT CAMERA/MIC - Reliable media control
-  // ============================================================
-
-  async disableMedia() {
-    console.log('📷 Tắt camera và microphone...');
-
+// Function to wait for meeting to become available with enhanced retry
+async function waitForMeetingAccess(page, maxRetries = 20) {
+  console.log(`Waiting for meeting access (max ${maxRetries} retries)...`);
+  let retryCount = 0;
+  
+  while (retryCount < maxRetries) {
+    retryCount++;
+    console.log(`Attempt ${retryCount}/${maxRetries}: Checking meeting access...`);
+    
+    // Refresh the page
     try {
-      // Try disable media shortcut first
-      await this.toggleMedia(SELECTORS.DISABLE_MEDIA, 'media shortcut');
-      
-      // Then individual controls
-      // await this.toggleMedia(SELECTORS.CAMERA_BUTTON, 'camera');
-      // await this.toggleMedia(SELECTORS.MIC_BUTTON, 'microphone');
-      
-      console.log('✅ Đã tắt camera/mic');
+      await page.reload({ waitUntil: 'networkidle', timeout: 30000 });
+      await page.waitForTimeout(3000);
+    } catch (error) {
+      console.log(`Reload failed on attempt ${retryCount}, continuing...`);
+    }
+    
+    // Check if still blocked
+    const isBlocked = await checkMeetingBlocked(page);
+    
+    if (!isBlocked) {
+      console.log(`✅ Meeting is now accessible after ${retryCount} attempts!`);
       return true;
-    } catch (error) {
-      console.log('⚠️ Lỗi tắt media:', error.message);
-      return false;
+    }
+    
+    // Fixed wait time of 10 seconds between retries
+    const waitTime = 10000; // 10 seconds
+    const waitSeconds = 10;
+    
+    console.log(`❌ Attempt ${retryCount} failed. Meeting still not accessible.`);
+    
+    if (retryCount < maxRetries) {
+      console.log(`⏳ Waiting ${waitSeconds} seconds before retry ${retryCount + 1}...`);
+      await page.waitForTimeout(waitTime);
     }
   }
+  
+  console.log(`🚫 Failed to access meeting after ${maxRetries} attempts.`);
+  return false;
+}
 
-  async toggleMedia(selectors, mediaType) {
-    for (const selector of selectors) {
-      try {
-        const button = this.page.locator(selector).first();
-        
-        if (await button.isVisible({ timeout: 2000 })) {
-          await button.click();
-          await this.page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
-          console.log(`🔇 ${mediaType} đã tắt`);
-          return true;
-        }
-      } catch (error) {
-        continue;
-      }
+// Function to turn off microphone and camera, then join the meeting
+async function turnOffMicCam(page) {
+  await page.waitForTimeout(TIMING.AFTER_JOIN_WAIT);
+  
+  // Handle name input if present
+  await handleNameInput(page);
+  
+  // Try to handle "Continue without microphone and camera" button first
+  try {
+    const disableMediaButton = await tryMultipleSelectors(page, SELECTORS.DISABLE_MEDIA, 3000);
+    if (disableMediaButton) {
+      await disableMediaButton.click();
+      console.log('Selected to continue without microphone and camera.');
+      await page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
     }
+  } catch (error) {
+    console.log('No disable media button found, proceeding with individual controls.');
+  }
+
+  // Try to turn off microphone
+  try {
+    const micButton = await tryMultipleSelectors(page, SELECTORS.MIC_BUTTON, 3000);
+    if (micButton) {
+      await micButton.click();
+      console.log('Microphone turned off.');
+      await page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
+    }
+  } catch (error) {
+    console.log('Microphone button not found or already muted.');
+  }
+
+  // Try to turn off camera
+  try {
+    const cameraButton = await tryMultipleSelectors(page, SELECTORS.CAMERA_BUTTON, 3000);
+    if (cameraButton) {
+      await cameraButton.click();
+      console.log('Camera turned off.');
+      await page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
+    }
+  } catch (error) {
+    console.log('Camera button not found or already off.');
+  }
+
+  // Try to join the meeting
+  try {
+    const joinButton = await tryMultipleSelectors(page, SELECTORS.JOIN_BUTTON, 10000);
+    if (joinButton) {
+      await joinButton.click();
+      console.log('Joined the meeting successfully.');
+      await page.waitForTimeout(TIMING.AFTER_JOIN_WAIT);
+    } else {
+      console.log('No join button found. Meeting may have started automatically.');
+    }
+  } catch (error) {
+    console.log('Error clicking join button:', error.message);
+  }
+}
+
+// Enhanced function to check if meeting has ended
+async function checkMeetingEnd(page) {
+  try {
+    const endIndicator = await tryMultipleSelectors(page, SELECTORS.MEETING_END, 2000);
+    return endIndicator !== null;
+  } catch (error) {
     return false;
   }
+}
 
-  // ============================================================
-  // ✅ 4. JOIN MEETING - Enhanced join button detection
-  // ============================================================
-
-  async clickJoinButton() {
-    console.log('🚪 Click nút tham gia...');
+// Function to handle meeting join with enhanced retry logic
+async function handleMeetingJoin(page) {
+  const maxRetries = 20; // Maximum retry attempts
+  
+  // Check if meeting is blocked
+  const isBlocked = await checkMeetingBlocked(page);
+  
+  if (isBlocked) {
+    console.log('🔒 Meeting is currently not accessible (host approval required or meeting not started).');
+    console.log(`📋 Starting retry process with ${maxRetries} maximum attempts...`);
     
-    for (const selector of SELECTORS.JOIN_BUTTON) {
-      try {
-        const button = this.page.locator(selector).first();
-        
-        if (await button.isVisible({ timeout: 5000 })) {
-          await button.click();
-          await this.page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
-          console.log('✅ Đã click join');
-          return true;
-        }
-      } catch (error) {
-        continue;
-      }
-    }
+    // Wait for meeting to become available with enhanced retry
+    const accessGranted = await waitForMeetingAccess(page, maxRetries);
     
-    // Try Ask to join button
-    for (const selector of SELECTORS.ASK_TO_JOIN) {
-      try {
-        const button = this.page.locator(selector).first();
-        
-        if (await button.isVisible({ timeout: 3000 })) {
-          await button.click();
-          await this.page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
-          console.log('✅ Đã yêu cầu tham gia');
-          return true;
-        }
-      } catch (error) {
-        continue;
-      }
-    }
-    
-    console.log('⚠️ Không tìm thấy nút join - có thể đã trong meeting');
-    return false;
-  }
-
-  // ============================================================
-  // 📝 5. ENABLE TRANSCRIPT - Better transcript activation
-  // ============================================================
-
-  async enableTranscript() {
-    console.log('📝 Bật transcript/captions...');
-    
-    try {
-      // Try clicking transcript button
-      for (const selector of SELECTORS.TRANSCRIPT_BUTTON) {
-        try {
-          const button = this.page.locator(selector).first();
-          
-          if (await button.isVisible({ timeout: 3000 })) {
-            await button.click();
-            await this.page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
-            console.log('✅ Transcript đã bật qua button');
-            return true;
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-
-      // Fallback: keyboard shortcut
-      try {
-        await this.page.keyboard.press(SHORTCUTS.TOGGLE_CAPTIONS);
-        await this.page.waitForTimeout(TIMING.AFTER_CLICK_WAIT);
-        console.log('✅ Transcript đã bật qua phím tắt');
-        return true;
-      } catch (error) {
-        console.log('⚠️ Không thể bật transcript - cần bật thủ công');
-        return false;
-      }
-    } catch (error) {
-      console.log('⚠️ Lỗi enable transcript:', error.message);
-      return false;
+    if (!accessGranted) {
+      const errorMsg = `❌ Could not access meeting after ${maxRetries} attempts. Possible reasons:
+      - Meeting requires host approval and host is not responding
+      - Meeting has not started yet and may be scheduled for later
+      - Meeting link is invalid or expired
+      - Network connectivity issues`;
+      
+      throw new Error(errorMsg);
     }
   }
+  
+  // Proceed with normal join flow
+  console.log('🎯 Proceeding with meeting join process...');
+  await turnOffMicCam(page);
+}
 
-  // ============================================================
-  // 👂 6. MONITOR & EXTRACT TRANSCRIPT - Optimized monitoring
-  // ============================================================
+// Main function to handle meeting automation
+async function joinMeeting(meetingLink, joinTime, exitTime) {
+  // Enhanced browser configuration with anti-detection
+  const browser = await chromium.launch({
+    headless: false, // Set for debugging; change to true for production
+    slowMo: 250, // Human-like delay
+    args: [
+      '--incognito',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-blink-features=AutomationControlled',
+      '--exclude-switches=enable-automation',
+      '--disable-infobars',
+      '--disable-extensions',
+      '--disable-plugins',
+      '--disable-sync',
+      '--disable-translate',
+      '--disable-features=TranslateUI',
+      '--disable-dev-shm-usage',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-web-security',
+      '--disable-background-networking',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-gpu',
+      '--mute-audio'
+    ]
+  });
 
-  async setupRecording() {
-    console.log('👂 Bắt đầu monitor transcript...');
-    this.isRunning = true;
+  // Enhanced context configuration
+  const context = await browser.newContext({
+    viewport: { width: 1366, height: 768 },
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    acceptDownloads: true,
+    bypassCSP: false,
+    ignoreHTTPSErrors: false,
+    permissions: [], // Minimal permissions
+    extraHTTPHeaders: {
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'Upgrade-Insecure-Requests': '1',
+      'DNT': '1'
+    },
+    locale: 'en-US',
+    timezoneId: 'Asia/Ho_Chi_Minh'
+  });
 
-    // Start monitoring intervals
-    this.intervals.transcript = setInterval(async () => {
-      if (!this.isRunning) return;
-      
-      try {
-        await this.extractor.extractTranscript(this.page);
-      } catch (error) {
-        if (DEBUG_CONFIG.VERBOSE_LOGGING) {
-          console.log('⚠️ Extract error:', error.message);
-        }
-      }
-    }, TIMING.TRANSCRIPT_CHECK_INTERVAL);
+  const page = await context.newPage();
 
-    this.intervals.title = setInterval(async () => {
-      if (!this.isRunning) return;
-      
-      try {
-        await this.extractor.updateMeetingTitle(this.page);
-      } catch (error) {
-        // Silent error
-      }
-    }, TIMING.TITLE_CHECK_INTERVAL);
+  // Set longer timeout for page loads
+  page.setDefaultTimeout(TIMING.PAGE_LOAD_TIMEOUT);
 
-    this.intervals.endCheck = setInterval(async () => {
-      if (!this.isRunning) return;
-      
-      await this.checkMeetingEnd();
-    }, TIMING.END_CHECK_INTERVAL);
+  try {
+    // Wait until join time
+    await waitUntil(joinTime);
 
-    // Status update interval
-    this.intervals.status = setInterval(() => {
-      if (!this.isRunning) return;
-      
-      const stats = this.extractor.getStats();
-      process.stdout.write(`\r📊 Live: ${stats.transcriptCount} transcripts, ${stats.duration}`);
-    }, 5000);
-
-    console.log('✅ Monitoring started');
-  }
-
-  // ============================================================
-  // MAIN FLOW - Streamlined execution
-  // ============================================================
-
-  async start(meetingUrl, botName = 'Transcript Bot') {
-    try {
-      console.log('🤖 Starting Meeting Bot...');
-      console.log(`📅 ${this.startTime.toLocaleString('vi-VN')}`);
-      
-      // 1. 🚀 Khởi tạo browser
-      await this.initBrowser();
-      
-      // 2. Join meeting flow
-      await this.joinMeeting(meetingUrl, botName);
-      
-      // 3. Setup recording
-      await this.setupRecording();
-      
-      console.log('✅ Bot đang hoạt động! Đang ghi transcript...');
-      console.log('📝 Monitoring transcript messages');
-      console.log('⏹️  Nhấn Ctrl+C để dừng và tải về\n');
-
-    } catch (error) {
-      console.error('❌ Bot thất bại:', error.message);
-      
-      if (DEBUG_CONFIG.SCREENSHOT_ON_ERROR && this.page) {
-        await this.takeDebugScreenshot('error');
-      }
-      
-      await this.cleanup();
-      throw error;
-    }
-  }
-
-  // ============================================================
-  // SUPPORTING METHODS
-  // ============================================================
-
-  async checkMeetingEnd() {
-    try {
-      if (!this.page || this.page.isClosed()) {
-        await this.handleMeetingEnd('Page closed');
-        return;
-      }
-
-      // Check for meeting end indicators
-      for (const selector of SELECTORS.MEETING_END) {
-        try {
-          const element = await this.page.$(selector);
-          if (element) {
-            await this.handleMeetingEnd('Meeting ended detected');
-            return;
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-
-      // Check if we're still in the meeting URL
-      const currentUrl = this.page.url();
-      if (!currentUrl.includes('meet.google.com')) {
-        await this.handleMeetingEnd('Left meeting URL');
-        return;
-      }
-
-    } catch (error) {
-      await this.handleMeetingEnd('Error checking meeting status');
-    }
-  }
-
-  async handleMeetingEnd(reason = 'Unknown') {
-    if (!this.isRunning) return;
-    
-    console.log(`\n🔚 Meeting ended: ${reason}`);
-    console.log('⏹️  Stopping recording and downloading...');
-    
-    this.isRunning = false;
-
-    // Clear all intervals
-    Object.values(this.intervals).forEach(interval => {
-      if (interval) clearInterval(interval);
+    console.log('Navigating to meeting...');
+    await page.goto(meetingLink, { 
+      waitUntil: 'networkidle',
+      timeout: TIMING.PAGE_LOAD_TIMEOUT 
     });
 
-    // Download transcript
-    try {
-      const filePath = await this.extractor.downloadTranscript();
-      console.log('🎉 Meeting transcript saved successfully!');
-      
-      // Show final stats
-      const stats = this.extractor.getStats();
-      console.log('\n📊 Final Statistics:');
-      console.log(`   📝 Transcripts: ${stats.transcriptCount}`);
-      console.log(`   ⏱️  Duration: ${stats.duration}`);
-      console.log(`   📄 File: ${filePath}`);
-      
-    } catch (error) {
-      console.error('❌ Download failed:', error.message);
-      
-      // Try to save data to console as backup
-      console.log('\n🆘 Backup - Raw data:');
-      console.log(JSON.stringify(this.extractor.getTranscriptData(), null, 2));
-    }
+    // Handle meeting access and join
+    await handleMeetingJoin(page);
+    console.log('Meeting started successfully.');
 
-    await this.cleanup();
-  }
+    // Monitor meeting until exit time or meeting ends
+    const exitTimeMs = exitTime.getTime();
+    let meetingEnded = false;
 
-  async takeDebugScreenshot(prefix = 'debug') {
-    try {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `${prefix}_${timestamp}.png`;
-      const screenshotPath = `./${DEBUG_CONFIG.SCREENSHOT_FOLDER}/${filename}`;
+    while (Date.now() < exitTimeMs && !meetingEnded) {
+      // Check if meeting has ended every 30 seconds
+      meetingEnded = await checkMeetingEnd(page);
       
-      await this.page.screenshot({ 
-        path: screenshotPath,
-        fullPage: true 
-      });
-      
-      console.log(`📸 Debug screenshot: ${screenshotPath}`);
-    } catch (error) {
-      console.log('⚠️ Could not take screenshot:', error.message);
-    }
-  }
-
-  async cleanup() {
-    try {
-      // Clear all intervals
-      Object.values(this.intervals).forEach(interval => {
-        if (interval) clearInterval(interval);
-      });
-      
-      // Close page first
-      if (this.page && !this.page.isClosed()) {
-        await this.page.close();
+      if (meetingEnded) {
+        console.log('Meeting has ended naturally.');
+        break;
       }
-      
-      // Close context
-      if (this.context) {
-        await this.context.close();
-      }
-      
-      // Close browser
-      if (this.browser) {
-        await this.browser.close();
-      }
-      
-      console.log('🧹 Cleanup completed');
-    } catch (error) {
-      console.error('⚠️ Cleanup error:', error.message);
+
+      // Wait 30 seconds before next check
+      await page.waitForTimeout(30000);
     }
-  }
 
-  // ============================================================
-  // PUBLIC METHODS
-  // ============================================================
-
-  getStats() {
-    return this.extractor.getStats();
-  }
-
-  async forceStop() {
-    await this.handleMeetingEnd('User stopped');
-  }
-
-  isActive() {
-    return this.isRunning;
-  }
-
-  getUptime() {
-    return Date.now() - this.startTime.getTime();
-  }
-}
-
-// ============================================================
-// CLI USAGE - Simplified
-// ============================================================
-
-async function main() {
-  const args = process.argv.slice(2);
-  const meetingUrl = args[0];
-  const botName = args[1] || 'Meeting Transcript Bot';
-
-  // Validate arguments
-  if (!meetingUrl) {
-    console.log('❌ Error: Meeting URL is required\n');
-    console.log('📖 Usage:');
-    console.log('   node src/bot.js "https://meet.google.com/your-link"');
-    console.log('   node src/bot.js "https://meet.google.com/your-link" "Custom Bot Name"');
-    console.log('\n💡 Examples:');
-    console.log('   node src/bot.js "https://meet.google.com/abc-defg-hij"');
-    console.log('   node src/bot.js "https://meet.google.com/abc-defg-hij" "Daily Standup Bot"');
-    process.exit(1);
-  }
-
-  if (!meetingUrl.includes('meet.google.com')) {
-    console.log('❌ Error: Invalid Google Meet URL');
-    console.log('💡 URL must contain "meet.google.com"');
-    process.exit(1);
-  }
-
-  // Display startup info
-  console.log('\n🤖 Meeting Transcript Bot v2.1.0 - Simplified');
-  console.log('=======================================================');
-  console.log(`🎯 Meeting: ${meetingUrl}`);
-  console.log(`👤 Bot Name: ${botName}`);
-  console.log(`📅 Started: ${new Date().toLocaleString('vi-VN')}\n`);
-
-  const bot = new MeetingBot();
-
-  // Handle Ctrl+C gracefully
-  process.on('SIGINT', async () => {
-    console.log('\n\n⏹️  User requested stop (Ctrl+C)');
-    await bot.forceStop();
-    process.exit(0);
-  });
-
-  // Handle uncaught errors
-  process.on('uncaughtException', async (error) => {
-    console.error('\n💥 Unexpected error:', error.message);
-    
-    if (DEBUG_CONFIG.VERBOSE_LOGGING) {
-      console.error(error.stack);
+    if (!meetingEnded) {
+      console.log('Scheduled exit time reached. Leaving meeting...');
     }
-    
-    try {
-      await bot.cleanup();
-    } catch (cleanupError) {
-      console.error('Cleanup error:', cleanupError.message);
-    }
-    
-    process.exit(1);
-  });
 
-  // Handle unhandled promise rejections
-  process.on('unhandledRejection', async (reason, promise) => {
-    console.error('\n💥 Unhandled promise rejection:', reason);
-    
-    try {
-      await bot.cleanup();
-    } catch (cleanupError) {
-      console.error('Cleanup error:', cleanupError.message);
-    }
-    
-    process.exit(1);
-  });
-
-  // Start the bot
-  try {
-    await bot.start(meetingUrl, botName);
   } catch (error) {
-    console.error('\n❌ Failed to start bot:', error.message);
-    process.exit(1);
+    console.error('Error during meeting automation:', error);
+    
+    // Take screenshot for debugging
+    try {
+      await page.screenshot({ path: `error-${Date.now()}.png` });
+      console.log('Error screenshot saved.');
+    } catch (screenshotError) {
+      console.log('Could not save error screenshot.');
+    }
+  } finally {
+    await browser.close();
+    console.log('Browser closed.');
   }
 }
 
-// ============================================================
-// MODULE EXPORTS
-// ============================================================
+// Main execution function
+async function main() {
+  try {
+    console.log('Google Meet Automation (JavaScript/Playwright)');
+    console.log('============================================');
+    console.log('🤖 Enhanced with 20-retry auto-join system');
+    console.log('⚡ Fast 10-second intervals for quick response');
+    console.log('🔄 Continuous retry until meeting becomes accessible\n');
 
-module.exports = MeetingBot;
+    // Get user input
+    const meetingLink = await askQuestion('Enter the meeting link: ');
 
-// Run CLI if this file is executed directly
-if (require.main === module) {
-  main().catch(error => {
-    console.error('Fatal error:', error);
-    process.exit(1);
-  });
+    // Join immediately
+    const joinTime = new Date(); // Join now
+    const exitTime = new Date(Date.now() + 3600000); // Exit after 1 hour
+
+    console.log(`\nJoining meeting immediately...`);
+    console.log(`Scheduled to leave at: ${exitTime.toLocaleTimeString()}`);
+    console.log(`Meeting link: ${meetingLink}\n`);
+
+    // Start the meeting automation
+    await joinMeeting(meetingLink, joinTime, exitTime);
+
+  } catch (error) {
+    console.error('Error:', error);
+  } finally {
+    rl.close();
+  }
 }
+
+// Run the script
+main().catch(console.error);
